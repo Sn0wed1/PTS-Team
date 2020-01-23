@@ -1,33 +1,40 @@
-# KEY VARIABLE RECALL & EXECUTION
-source /opt/plexguide/menu/pgscan/scripts/endbanner.sh
-mkdir -p /var/plexguide/pgscan
+#!/bin/bash
 # FUNCTIONS START ##############################################################
-# FIRST FUNCTION
+rmoldinstall() {
+  dcheck=$(systemctl is-active plex_autoscan.service)
+  if [[ "$dcheck" == "active" ]]; then
+    service plex_autoscan stop
+    rm -rf /opt/plex_autoscan
+    rm -rf /etc/systemd/system/plex_autoscan.service
+	rm -rf /var/plexguide/pgscan
+    fresh
+  else fresh; fi
+}
+fresh() {
+mkdir -p /var/plexguide/pgscan
+echo "en" >/var/plexguide/pgscan/fixmatch.lang
+echo "false" >/var/plexguide/pgscan/fixmatch.status
+echo "NOT-SET" >/var/plexguide/pgscan/plex.docker
+}
 variable() {
   file="$1"
   if [[ ! -e "$file" ]]; then echo "$2" >$1; fi
 }
-passtartfirst() {
-file="/opt/plex_autoscan/config/config.json"
-  if [[ ! -f $file ]]; then
-	pasundeployed 
-  else plexcheck; fi
-}
 deploycheck() {
-  dcheck=$(systemctl is-active plex_autoscan.service)
-  if [[ "$dcheck" == "active" ]]; then
-    dstatus="✅ DEPLOYED"
-  else dstatus="⚠️ NOT DEPLOYED"; fi
+  dcheck=$(docker ps --format '{{.Names}}' | grep "plexautoscan")
+  if [[ "$dcheck" == "plexautoscan" ]]; then
+    dstatus="✅ DOCKER DEPLOYED"
+  else dstatus="⚠️ DOCKER NOT DEPLOYED"; fi
 }
 tokenstatus() {
   ptokendep=$(cat /var/plexguide/pgscan/plex.token)
   if [[ "$ptokendep" != "" ]]; then
-        if [[ ! -f "/opt/plex_autoscan/config/config.json" ]]; then
-                pstatus="❌ DEPLOYED BUT PAS CONFIG MISSING";
+        if [[ ! -f "/opt/appdata/plexautoscan/config/config.json" ]]; then
+                pstatus="❌ TOKEN DEPLOYED || PAS CONFIG MISSING";
         else
-                PGSELFTEST=$(curl -LI "http://$(hostname -I | awk '{print $1}'):32400/system?X-Plex-Token=$(cat /opt/plex_autoscan/config/config.json | jq .PLEX_TOKEN | sed 's/"//g')" -o /dev/null -w '%{http_code}\n' -s)
-                if [[ $PGSELFTEST -ge 200 && $PGSELFTEST -le 299 ]]; then pstatus="✅ DEPLOYED"
-                else pstatus="❌ DEPLOYED BUT PAS TOKEN FAILED"; fi
+                PGSELFTEST=$(curl -LI "http://$(hostname -I | awk '{print $1}'):32400/system?X-Plex-Token=$(cat /opt/appdata/plexautoscan/config/config.json | jq .PLEX_TOKEN | sed 's/"//g')" -o /dev/null -w '%{http_code}\n' -s)
+                if [[ $PGSELFTEST -ge 200 && $PGSELFTEST -le 299 ]]; then pstatus="✅ TOKEN DEPLOYED"
+                else pstatus="❌ DOCKER DEPLOYED || PAS TOKEN FAILED"; fi
         fi
   else pstatus="⚠️ NOT DEPLOYED"; fi
 }
@@ -45,10 +52,10 @@ plexcheck() {
 token() {
   touch /var/plexguide/pgscan/plex.token
   ptoken=$(cat /var/plexguide/pgscan/plex.token)
-  if [[ "$ptoken" == "" ]]; then
-    tokencreate
+  if [[ ! -f "$ptoken" ]]; then
+      tokencreate
 	sleep 2
-	X_PLEX_TOKEN=$(sudo cat "/opt/appdata/plex/database/Library/Application Support/Plex Media Server/Preferences.xml" | sed -e 's;^.* PlexOnlineToken=";;' | sed -e 's;".*$;;' | tail -1)
+    X_PLEX_TOKEN=$(sudo cat "/opt/appdata/plex/database/Library/Application Support/Plex Media Server/Preferences.xml" | sed -e 's;^.* PlexOnlineToken=";;' | sed -e 's;".*$;;' | tail -1)
     ptoken=$(cat /var/plexguide/pgscan/plex.token)
     if [[ "$ptoken" != "$X_PLEX_TOKEN" ]]; then
 	printf '
@@ -62,15 +69,36 @@ token() {
   fi
 }
 tokencreate() {
-templatebackup=/opt/plexguide/menu/roles/plex_autoscan/templates/config.backup
-template=/opt/plexguide/menu/roles/plex_autoscan/templates/config.json.j2
+printf '
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 START Plex_AutoScan Token Create
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'
+
+templatebackup=/opt/plexguide/menu/pgscan/templates/config.backup
+template=/opt/plexguide/menu/pgscan/templates/config.json.j2
 X_PLEX_TOKEN=$(sudo cat "/opt/appdata/plex/database/Library/Application Support/Plex Media Server/Preferences.xml" | sed -e 's;^.* PlexOnlineToken=";;' | sed -e 's;".*$;;' | tail -1)
 
 cp -r $template $templatebackup
 echo $X_PLEX_TOKEN >/var/plexguide/pgscan/plex.token
 
+printf '
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ FINISHED Plex_AutoScan Token  🚀 START SERVERPASS Create
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'
+
 RAN=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
 echo $RAN >/var/plexguide/pgscan/pgscan.serverpass
+
+printf '
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ FINISHED Plex_AutoScan Token || SERVERPASS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'
+
+timerremove
+question1 
 }
 badinput() {
   echo
@@ -89,14 +117,10 @@ works() {
 }
 credits() {
 clear
-chk=$(figlet Plex Auto Scan | lolcat )
-  tee <<-EOF
-
+printf '
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 Plex_AutoScan Credits 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-$chk
 
 #########################################################################
 # Author:   l3uddz                                                      #
@@ -111,9 +135,7 @@ $chk
 #########################################################################
 #                   GNU General Public License v3.0                     #
 #########################################################################
-EOF
-
- echo
+'
   read -p 'Confirm Info | PRESS [ENTER] ' typed </dev/tty
   clear && question1
 }
@@ -122,43 +144,74 @@ doneenter() {
   read -p 'All done | PRESS [ENTER] ' typed </dev/tty
   clear && question1
 }
-showupdomain() {
-PAS_CONFIG="/opt/plex_autoscan/config/config.json"
-SERVER_IP=$(cat ${PAS_CONFIG} | jq -r .SERVER_IP)
-SERVER_PORT=$(cat ${PAS_CONFIG} | jq -r .SERVER_PORT)
-SERVER_PASS=$(cat ${PAS_CONFIG} | jq -r .SERVER_PASS)
-if [[ -f "$PAS_CONFIG" ]]; then
-  tee <<-EOF
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 Plex_AutoScan Domain Interface
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-"Your Plex Autoscan URL:"
-
-"http://${SERVER_IP}:${SERVER_PORT}/${SERVER_PASS}"
-
-Press Enter to Exit
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
- works
- else question1; fi
+####REMOVEPART start
+# KEY VARIABLE RECALL & EXECUTION
+timerremove() {
+seconds=10; date1=$((`date +%s` + $seconds)); 
+while [ "$date1" -ge `date +%s` ]; do 
+  echo -ne "$(date -u --date @$(($date1 - `date +%s` )) +%H:%M:%S)\r"; 
+done
 }
 remove() {
-PAS_CONFIG="/opt/plex_autoscan/config/config.json"
-if [[ -f "$PAS_CONFIG" ]]; then
-ansible-playbook /opt/plexguide/menu/pgscan/remove-pgscan.yml
-sleep 5
-  printf '
+  dcheck=$(docker ps --format '{{.Names}}' | grep "plexautoscan")
+  if [[ "$dcheck" == "plexautoscan" ]]; then
+    removepas
+  else 
+    notinstalled
+  fi
+}
+
+removepas() {
+printf '
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 Plex_AutoScan is full removed
+🚀 STARTING Remove Plex AutoScan Docker  || l3uddz/plex_autoscan 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 '
- echo 
-  read -p 'All done | PRESS [ENTER] ' typed </dev/tty
-  else question1; fi
+
+docker stop plexautoscan
+docker rm plexautoscan
+rm -rf /opt/appdata/plexautoscan
+rm -rf /var/plexguide/pgscan
+fresh
+echo "en" >/var/plexguide/pgscan/fixmatch.lang
+echo "false" >/var/plexguide/pgscan/fixmatch.status
+echo "NOT-SET" >/var/plexguide/pgscan/plex.docker
+
+printf '
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 FINISHED REMOVE Plex AutoScan Docker
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'
+timerremove
+question1 
 }
+notinstalled() {
+
+printf '
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⛔️  WARNING! - PAS is Not Installed or Running! Exiting!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'
+timerremove
+question1
+}
+##### REMOVE END
+logger() {
+  dcheck=$(docker ps --format '{{.Names}}' | grep "plexautoscan")
+  if [[ "$dcheck" == "plexautoscan" ]]; then
+printf '
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 ACTIVE LOGS Plex AutoScan Docker  || l3uddz/plex_autoscan 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'
+    tail -n 50 /opt/appdata/plexautoscan/config/plex_autoscan.log
+    doneenter
+  else 
+    notinstalled
+  fi
+}
+
 fxmatch() {
   tee <<-EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -179,6 +232,7 @@ entry before correcting the match on the new item.
 [Z] - Exit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 EOF
 
   read -p '↘️  Type Number | Press [ENTER]: ' typed </dev/tty
@@ -192,7 +246,8 @@ EOF
   esac
 }
 lang() {
-  tee <<-EOF
+  
+tee <<-EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 Plex_AutoScan FixMatching  Lang
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -209,6 +264,7 @@ Default is "en"
 [Z] - Exit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 EOF
 
   read -p '↘️  Type Lang | Press [ENTER]: ' typed </dev/tty
@@ -257,63 +313,15 @@ EOF
   *) fxmatch ;;
   esac
 }
-# pasuideploy() {
-# ui=/opt/appdata/pgui
-# if [[ -d "$ui" ]]; then cp -rv /opt/plexguide/menu/pgui/templates/autoscan-index.php /opt/appdata/pgui/index.php; fi
-# }
-# pasuiremove() {
-# ui=/opt/appdata/pgui
-# if [[ -d "$ui" ]]; then cp -rv /opt/plexguide/menu/pgui/templates/index.php /opt/appdata/pgui/index.php; fi
-# }
-#######################################################################################
-lore() {
-remoteip=$(wget -qO- http://ipecho.net/plain | xargs echo)
-localip=$(cat /var/plexguide/server.ip)
-  tee <<-EOF
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 Plex Host 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Local Server IP            [ $localip ]
-Remote Server IP           [ $remoteip ] 
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-[1] Set Local Server IP (Home Server)
-[2] Set Remote Server IP (Dedicated Server)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[Z] - Exit
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EOF
-
-  read -p '↘️  Type Number | Press [ENTER]: ' typed </dev/tty
-
-  case $typed in
-  1) 
-      cp -r /var/plexguide/server.ip /var/plexguide/pgscan/pgscan.ip
-	  echo "IP SET" >/var/plexguide/pgscan/pgscan.ipsetup
-      question1	  
-	  ;;
-  2) 
-      wget -qO- http://ipecho.net/plain | xargs echo >/var/plexguide/pgscan/pgscan.ip 
-	  echo "IP SET" >/var/plexguide/pgscan/pgscan.ipsetup
-      question1	  
-	  ;;
-  z) question1 ;;
-  Z) question1 ;;
-  *) lore ;;
-  esac
-}
 pversion() {
 plexcontainerversion=$(docker ps --format '{{.Image}}' | grep "plex")
   if [[ "$plexcontainerversion" == "linuxserver/plex:latest" ]]; then
       echo -e "abc" >/var/plexguide/pgscan/plex.dockeruserset
-   else echo "plex" >/var/plexguide/pgscan/plex.dockeruserset
+   else echo "abc" >/var/plexguide/pgscan/plex.dockeruserset
 fi
 pasuserdocker=$(cat /var/plexguide/pgscan/plex.dockeruserset)
-  tee <<-EOF
+
+tee <<-EOF
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 Plex Docker
@@ -326,34 +334,101 @@ Plex Docker Image:          [ $plexcontainerversion ]
 Set Plex Docker user:       [ $pasuserdocker ]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 EOF
+
 cp -r /var/plexguide/pgscan/plex.dockeruserset /var/plexguide/pgscan/plex.docker 1>/dev/null 2>&1
 doneenter
+
 }
+
+showuppage() {
+  dpas=$(docker ps --format '{{.Names}}' | grep "plexautoscan")
+  dtra=$(docker ps --format '{{.Names}}' | grep "traefik")
+  if [[ "$dpas" == "plexautoscan" && "$dtra" == "traefik"  ]]; then
+    showpaspage="http://plexautoscan:3468/$(cat /var/plexguide/pgscan/pgscan.serverpass)"
+  else showpaspage="http://$(cat /var/plexguide/server.ip):3468/$(cat /var/plexguide/pgscan/pgscan.serverpass)"; fi
+}
+
 question1() {
+  dcheck=$(docker ps --format '{{.Names}}' | grep "plexautoscan")
+  if [[ "$dcheck" == "plexautoscan" ]]; then
+    deplyoed
+  else undeployed; fi
+}
+pasdeploy() {
+ansible-playbook /opt/plexguide/menu/pgscan/yml/plexautoscan.yml
+clear 
+}
+undeployed() {
 langfa=$(cat /var/plexguide/pgscan/fixmatch.status)
 lang=$(cat /var/plexguide/pgscan/fixmatch.lang)
-steip=$(cat /var/plexguide/pgscan/pgscan.ipsetup)
 dplexset=$(cat /var/plexguide/pgscan/plex.docker)
 tokenstatus
 deploycheck
-  tee <<-EOF
+
+tee <<-EOF
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 Plex_AutoScan Interface  || l3uddz/plex_autoscan
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-NOTE : Plex_AutoScan are located in /opt/plex_autoscan
+[1] Deploy Plex Token                     [ $pstatus ]
+[2] Fixmatch Lang                         [ $lang | $langfa ]
+[3] Plex Docker Version                   [ $dplexset ]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[A] Deploy Plex-Auto-Scan Docker          [ $dstatus ]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Z] - Exit
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EOF
+
+  read -p '↘️  Type Number | Press [ENTER]: ' typed </dev/tty
+
+  case $typed in
+  1) tokencreate && clear && question1 ;;
+  2) fxmatch && clear && question1 ;;
+  3) pversion && clear && question1 ;;
+  A) pasdeploy && question1 ;;
+  a) pasdeploy && question1 ;;
+  C) credits && clear && question1 ;;
+  c) credits && clear && question1 ;;
+  z) exit 0 ;;
+  Z) exit 0 ;;
+  *) question1 ;;
+  esac
+}
+
+deplyoed() {
+langfa=$(cat /var/plexguide/pgscan/fixmatch.status)
+lang=$(cat /var/plexguide/pgscan/fixmatch.lang)
+dplexset=$(cat /var/plexguide/pgscan/plex.docker)
+showuppage
+tokenstatus
+deploycheck
+
+tee <<-EOF
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 Plex_AutoScan Interface  || l3uddz/plex_autoscan
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [1] Deploy Plex Token                     [ $pstatus ]
 [2] Fixmatch Lang                         [ $lang | $langfa ]
-[3] Local or Remote Version               [ $steip ]
-[4] Plex Docker Version                   [ $dplexset ]
+[3] Plex Docker Version                   [ $dplexset ]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[A] Deploy Plex-Auto-Scan                 [ $dstatus ]
 
-[D] PlexAutoScan Domain
+PAS Webhook ARRs : [ $showpaspage ]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[A] Redeploy Plex-Auto-Scan Docker          [ $dstatus ]
+
 [S] Show last 50 lines of Plex_AutoScan log
 [R] Remove Plex_AutoScan
 [C] Credits
@@ -363,6 +438,7 @@ NOTE : Plex_AutoScan are located in /opt/plex_autoscan
 [Z] - Exit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 EOF
 
   read -p '↘️  Type Number | Press [ENTER]: ' typed </dev/tty
@@ -370,16 +446,13 @@ EOF
   case $typed in
   1) tokencreate && clear && question1 ;;
   2) fxmatch && clear && question1 ;;
-  3) lore && clear && question1 ;;
-  4) pversion && clear && question1 ;;
-  A) ansible-playbook /opt/plexguide/menu/pg.yml --tags plex_autoscan && clear && question1 ;;
-  a) ansible-playbook /opt/plexguide/menu/pg.yml --tags plex_autoscan && clear && question1 ;;
-  D) showupdomain && clear && question1 ;;
-  d) showupdomain && clear && question1 ;;
-  S) tail -n 50 /opt/plex_autoscan/plex_autoscan.log && doneenter ;;
-  s) tail -n 50 /opt/plex_autoscan/plex_autoscan.log && doneenter;;
-  r) remove && doneenter  && sleep 5 && clear && exit 0 ;;
-  R) remove && doneenter && sleep 5 && clear && exit 0 ;;
+  3) pversion && clear && question1 ;;
+  A) pasdeploy && question1 ;;
+  a) pasdeploy && question1 ;;
+  S) logger ;;
+  s) logger ;;
+  r) removepas ;;
+  R) removepas ;;
   C) credits && clear && question1 ;;
   c) credits && clear && question1 ;;
   z) exit 0 ;;
@@ -388,11 +461,11 @@ EOF
   esac
 }
 # FUNCTIONS END ##############################################################
-passtartfirst
+rmoldinstall
+plexcheck
 tokenstatus
 variable /var/plexguide/pgscan/fixmatch.lang "en"
 variable /var/plexguide/pgscan/fixmatch.status "false"
-variable /var/plexguide/pgscan/pgscan.ipsetup "NOT-SET"
 variable /var/plexguide/pgscan/plex.docker "NOT-SET"
 deploycheck
 question1
